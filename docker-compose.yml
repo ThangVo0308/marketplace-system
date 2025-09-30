@@ -1,0 +1,257 @@
+version: '3.9'
+
+services:
+  #  MYSQL
+  marketplace-mysql:
+    image: mysql:latest
+    container_name: marketplace-mysql
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_ROOT_PASSWORD: ""
+      MYSQL_DATABASE: marketplace_db
+    volumes:
+      - ./docker/marketplace-mysql-init-db:/docker-entrypoint-initdb.d:ro
+      - marketplace-mysql-data:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # PHPMYADMIN
+  marketplace-phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: marketplace-phpmyadmin
+    depends_on:
+      [ marketplace-mysql ]
+    environment:
+      PMA_HOST: marketplace-mysql
+      PMA_PORT: 3306
+      PMA_USER: root
+      PMA_PASSWORD: ""
+      MYSQL_ROOT_PASSWORD: ""
+    ports:
+      - "8000:80"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #  REDIS
+  marketplace-redis:
+    image: redis:latest
+    container_name: marketplace-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - marketplace-redis-data:/data
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #  REDIS INSIGHT
+  marketplace-redis-insight:
+    image: redis/redisinsight:latest
+    container_name: marketplace-redis-insight
+    volumes:
+      - marketplace-redis-insight-data:/db
+    ports:
+      - "5540:5540"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # KAFKA BROKER
+  marketplace-kafka-broker:
+    image: bitnami/kafka:3.5.2-debian-12-r24
+    container_name: marketplace-kafka-broker
+    hostname: marketplace-kafka-broker
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_BROKER_ID: 1
+      KAFKA_KRAFT_MODE: true
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT_LOCAL://0.0.0.0:9092,PLAINTEXT_DOCKER://0.0.0.0:9093,CONTROLLER://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT_LOCAL://localhost:9092,PLAINTEXT_DOCKER://marketplace-kafka-broker:9093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT_LOCAL:PLAINTEXT,PLAINTEXT_DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_DOCKER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@marketplace-kafka-broker:9094
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: PLAIN
+    volumes:
+      - marketplace-kafka-broker-data:/var/lib/kafka/data
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+      - "9094:9094"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # KAFKA UI
+  marketplace-kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: marketplace-kafka-ui
+    depends_on:
+      [ marketplace-kafka-broker ]
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: PLAINTEXT://marketplace-kafka-broker:9093
+    volumes:
+      - marketplace-kafka-ui-data:/app/kafka-ui/data
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # MINIO
+  marketplace-minio:
+    image: minio/minio:RELEASE.2024-08-26T15-33-07Z.fips
+    container_name: marketplace-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - marketplace-minio-data:/data:r
+    environment:
+      MINIO_ROOT_USER: group23
+      MINIO_ROOT_PASSWORD: gRoUp23IsThEbEsT#
+    command: server /data --console-address ":9001"
+
+  #_______________________________________GRAFANA STACK_______________________________________
+  #  TEMPO
+  marketplace-tempo:
+    image: grafana/tempo:main-bbe0435
+    container_name: marketplace-tempo
+    command: [ "-config.file=/etc/tempo.yaml" ]
+    volumes:
+      - ./docker/grafana-stack/tempo/tempo.yml:/etc/tempo.yaml:ro
+      - ./docker/grafana-stack/tempo/tempo-data:/tmp/tempo
+    ports:
+      - "3110:3100" # Tempo
+      - "9411:9411" # zipkin
+      - "4317:4317" # OTel
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #  LOKI
+  marketplace-loki:
+    image: grafana/loki:main
+    container_name: marketplace-loki
+    command: [ "-config.file=/etc/loki/local-config.yaml" ]
+    ports:
+      - "3100:3100"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #  PROMETHEUS
+  marketplace-prometheus:
+    image: prom/prometheus:main
+    container_name: marketplace-prometheus
+    command:
+      - --enable-feature=exemplar-storage
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./docker/grafana-stack/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #  GRAFANA
+  marketplace-grafana:
+    image: grafana/grafana:10.1.0
+    container_name: marketplace-grafana
+    environment:
+      #      GF_AUTH_ANONYMOUS_ENABLED: true
+      #      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      #      GF_AUTH_DISABLE_LOGIN_FORM: true
+      GF_SECURITY_ADMIN_USER: thangvo
+      GF_SECURITY_ADMIN_PASSWORD: thangvo
+    volumes:
+      #      - ./docker/grafana-stack/grafana:/etc/grafana/provisioning/datasources:ro
+      - ./docker/grafana-stack/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+      - ./docker/grafana-stack/grafana/dashboards:/etc/grafana/provisioning/dashboards
+    #      - ./docker/grafana-stack/grafana/grafana.ini:/etc/grafana/grafana.ini
+    ports:
+      - "3000:3000"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  #_______________________________________ELK STACK_______________________________________
+  # ELASTICSEARCH
+  marketplace-elasticsearch:
+    image: elasticsearch:8.15.0
+    container_name: marketplace-elasticsearch
+    environment:
+      xpack.security.enabled: false
+      discovery.type: single-node
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - IPC_LOCK
+    volumes:
+      - marketplace-elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # KIBANA
+  marketplace-kibana:
+    image: kibana:8.15.0
+    container_name: marketplace-kibana
+    depends_on:
+      [ marketplace-elasticsearch ]
+    environment:
+      ELASTICSEARCH_HOSTS: http://marketplace-elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+  # LOGSTASH
+  marketplace-logstash:
+    image: logstash:8.15.0
+    container_name: marketplace-logstash
+    depends_on:
+      [ marketplace-elasticsearch ]
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    volumes:
+      - ./docker/elk-stack/logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./docker/elk-stack/logstash/pipeline:/usr/share/logstash/pipeline:ro
+    ports:
+      - "5044:5044"
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+    networks:
+      - marketplace-network
+    restart: unless-stopped
+
+
+networks:
+  marketplace-network:
+    driver: bridge
+
+volumes:
+  marketplace-mysql-data:
+  marketplace-redis-data:
+  marketplace-redis-insight-data:
+  marketplace-kafka-broker-data:
+  marketplace-kafka-ui-data:
+  marketplace-minio-data:
+  marketplace-elasticsearch-data:
