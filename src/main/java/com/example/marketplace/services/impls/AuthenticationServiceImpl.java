@@ -71,7 +71,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
 
     KafkaTemplate<String, String> kafkaTemplate;
 
-    BaseRedisService<String, String, Object> baseRedisService;
+//    BaseRedisService<String, String, Object> baseRedisService;
 
     @NonFinal
     @Value("${security.oauth2.client.registration.google.client-id}")
@@ -375,11 +375,13 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 : new JWSObject(accessHeader, payload);
 
         try {
-            if (isRefresh)
-                jwsObject.sign(new MACSigner(REFRESH_SIGNER_KEY.getBytes()));
-            else
-                jwsObject.sign(new MACSigner(ACCESS_SIGNER_KEY.getBytes()));
-
+            if (isRefresh) {
+                byte[] keyBytes = Base64.getDecoder().decode(REFRESH_SIGNER_KEY);
+                jwsObject.sign(new MACSigner(keyBytes));
+            } else {
+                byte[] keyBytes = Base64.getDecoder().decode(ACCESS_SIGNER_KEY);
+                jwsObject.sign(new MACSigner(keyBytes));
+            }
             return jwsObject.serialize();
 
         } catch (JOSEException e) {
@@ -412,10 +414,10 @@ public class AuthenticationServiceImpl implements AuthenticationService {
         if (!signedAccessTokenJWT.getJWTClaimsSet().getSubject().equals(id))
             throw new AuthenticationException(INVALID_TOKEN, BAD_REQUEST);
 
-        if (expiryTime.after(new Date())) {
-            baseRedisService.set(jwtID, "revoked");
-            baseRedisService.setTimeToLive(jwtID, expiryTime.getTime() - System.currentTimeMillis());
-        }
+//        if (expiryTime.after(new Date())) {
+//            baseRedisService.set(jwtID, "revoked");
+//            baseRedisService.setTimeToLive(jwtID, expiryTime.getTime() - System.currentTimeMillis());
+//        }
 
         return user;
     }
@@ -467,20 +469,20 @@ public class AuthenticationServiceImpl implements AuthenticationService {
             SignedJWT signAccessToken = verifyToken(accessToken, false);
             Date AccessTokenExpiryTime = signAccessToken.getJWTClaimsSet().getExpirationTime();
 
-            if (AccessTokenExpiryTime.after(new Date())) {
-                baseRedisService.set(signAccessToken.getJWTClaimsSet().getJWTID(), "revoked");
-                baseRedisService.setTimeToLive(signAccessToken.getJWTClaimsSet().getJWTID(),
-                        AccessTokenExpiryTime.getTime() - System.currentTimeMillis());
-            }
+//            if (AccessTokenExpiryTime.after(new Date())) {
+//                baseRedisService.set(signAccessToken.getJWTClaimsSet().getJWTID(), "revoked");
+//                baseRedisService.setTimeToLive(signAccessToken.getJWTClaimsSet().getJWTID(),
+//                        AccessTokenExpiryTime.getTime() - System.currentTimeMillis());
+//            }
 
             SignedJWT signRefreshToken = verifyToken(refreshToken, true);
             Date RefreshTokenExpiryTime = signRefreshToken.getJWTClaimsSet().getExpirationTime();
 
-            if (RefreshTokenExpiryTime.after(new Date())) {
-                baseRedisService.set(signRefreshToken.getJWTClaimsSet().getJWTID(), "revoked");
-                baseRedisService.setTimeToLive(signRefreshToken.getJWTClaimsSet().getJWTID(),
-                        RefreshTokenExpiryTime.getTime() - System.currentTimeMillis());
-            }
+//            if (RefreshTokenExpiryTime.after(new Date())) {
+//                baseRedisService.set(signRefreshToken.getJWTClaimsSet().getJWTID(), "revoked");
+//                baseRedisService.setTimeToLive(signRefreshToken.getJWTClaimsSet().getJWTID(),
+//                        RefreshTokenExpiryTime.getTime() - System.currentTimeMillis());
+//            }
 
         } catch (AuthenticationException exception) {
             log.error("Cannot sign out", exception);
@@ -506,9 +508,19 @@ public class AuthenticationServiceImpl implements AuthenticationService {
     }
 
     private SignedJWT verifyToken(String token, boolean isRefresh) throws JOSEException, ParseException {
-        JWSVerifier verifier = (isRefresh)
-                ? new MACVerifier(REFRESH_SIGNER_KEY.getBytes())
-                : new MACVerifier(ACCESS_SIGNER_KEY.getBytes());
+        System.out.println("=== DEBUG VERIFY TOKEN ===");
+        System.out.println("Is Refresh: " + isRefresh);
+        System.out.println("ACCESS_SIGNER_KEY: " + ACCESS_SIGNER_KEY);
+        System.out.println("REFRESH_SIGNER_KEY: " + REFRESH_SIGNER_KEY);
+
+        byte[] keyBytes = isRefresh
+                ? Base64.getDecoder().decode(REFRESH_SIGNER_KEY)
+                : Base64.getDecoder().decode(ACCESS_SIGNER_KEY);
+
+        System.out.println("Key bytes length: " + keyBytes.length);
+        System.out.println("Key bytes (Base64): " + Base64.getEncoder().encodeToString(keyBytes));
+
+        JWSVerifier verifier = new MACVerifier(keyBytes);
 
         SignedJWT signedJWT = SignedJWT.parse(token);
 
@@ -524,7 +536,7 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 throw new AuthenticationException(INVALID_SIGNATURE, UNAUTHORIZED);
 
             SecretKeySpec secretKeySpec = new SecretKeySpec(
-                    REFRESH_SIGNER_KEY.getBytes(),
+                    keyBytes,
                     REFRESH_TOKEN_SIGNATURE_ALGORITHM.getName()
             );
             try {
@@ -542,15 +554,14 @@ public class AuthenticationServiceImpl implements AuthenticationService {
                 throw new AuthenticationException(TOKEN_INVALID, UNAUTHORIZED);
         }
 
-        String value = (String) baseRedisService.get(signedJWT.getJWTClaimsSet().getJWTID());
-
-        if (value != null) {
-            if (value.equals("revoked"))
-                throw new AuthenticationException(TOKEN_REVOKED, UNAUTHORIZED);
-
-            else
-                throw new AuthenticationException(TOKEN_BLACKLISTED, UNAUTHORIZED);
-        }
+//        String value = (String) baseRedisService.get(signedJWT.getJWTClaimsSet().getJWTID());
+//
+//        if (value != null) {
+//            if (value.equals("revoked"))
+//                throw new AuthenticationException(TOKEN_REVOKED, UNAUTHORIZED);
+//            else
+//                throw new AuthenticationException(TOKEN_BLACKLISTED, UNAUTHORIZED);
+//        }
 
         return signedJWT;
     }

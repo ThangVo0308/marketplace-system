@@ -59,7 +59,7 @@ public class SecurityConfig {
                         "/auth/social/callback",
                         "/auth/sign-out",
                         "/auth/introspect",
-                        "/users",
+                        "/users/**",
                         "/auth/**",
                         "/api/v1/auth/**"
 
@@ -68,22 +68,22 @@ public class SecurityConfig {
                 .toList().toArray(new String[0]);
 
                 httpSecurity.authorizeHttpRequests(request -> {
+                        // log.info("Public Endpoints: " + Arrays.toString(PUBLIC_ENDPOINTS));
                         request.requestMatchers(PUBLIC_ENDPOINTS)
-                                        .permitAll()
-                                        .anyRequest()
-                                        // .permitAll();
-                                        .authenticated();
+                                .permitAll()
+                                .anyRequest()
+                                // .permitAll();
+                                .authenticated();
 
+                        log.info("Request: {}", request);
                 });
 
-                httpSecurity
-                        .oauth2ResourceServer(oauth2 -> oauth2
-                                .jwt(jwt -> jwt
-                                        .decoder(customJwtDecoder)
-                                        .jwtAuthenticationConverter(jwtAuthenticationConverter())
-                                )
-                                .authenticationEntryPoint(new JwtAuthenticationEntryPoint())
-                        )
+                // Configure the JWT decoder and authentication converter
+                httpSecurity.oauth2ResourceServer(oauth2 -> oauth2.jwt(
+                                        jwtConfigurer -> jwtConfigurer
+                                                .decoder(customJwtDecoder)
+                                                .jwtAuthenticationConverter(jwtAuthenticationConverter()))
+                                .authenticationEntryPoint(new JwtAuthenticationEntryPoint()))
                         .csrf(AbstractHttpConfigurer::disable)
                         .cors(withDefaults())
                         .sessionManagement(c -> c.sessionCreationPolicy(SessionCreationPolicy.STATELESS));

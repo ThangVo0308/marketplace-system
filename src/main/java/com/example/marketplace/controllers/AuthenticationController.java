@@ -107,8 +107,8 @@ public class AuthenticationController {
 
         authenticationService.signIn(request.email(), request.password());
 
-        String accessToken = authenticationService.generateToken(user, true);
-        String refreshToken = authenticationService.generateToken(user, false);
+        String accessToken = authenticationService.generateToken(user, false);
+        String refreshToken = authenticationService.generateToken(user, true);
 
         return ResponseEntity.status(OK).body(
                 SignInResponse.builder()

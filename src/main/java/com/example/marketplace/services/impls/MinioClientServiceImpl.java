@@ -202,6 +202,7 @@ public class MinioClientServiceImpl implements MinioClientService {
     private void saveChunkProgress(long startByte, List<ChunkUploadProgress> uploadProgresses) {
         synchronized (uploadProgresses) {
             ChunkUploadProgress chunkUploadProgress = uploadProgresses.stream()
+                    .filter(item -> item.getChunkPosition() == startByte)
                     .findFirst() // if exists
                     .orElseGet(() -> {// does not exist
                         ChunkUploadProgress newChunk = new ChunkUploadProgress(startByte, false);
